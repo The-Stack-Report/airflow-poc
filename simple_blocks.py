@@ -5,14 +5,18 @@ from datetime import timedelta, datetime
 from airflow.models import Variable
 from airflow import DAG
 
-import csv
 
 import pandas as pd
 import boto3
+import os
 
 from airflow.operators.python import PythonOperator
 
+session = boto3.session.Session()
 file_path = "/opt/airflow/dags/block_stats.csv" # so we can see it in our dags folder, should be something else in the real world
+
+ACCESS_ID = Variable.get("AWS_ACCESS_ID")
+ACCESS_KEY = Variable.get("AWS_ACCESS_KEY")
 
 def run_query():
     engine_params = Variable.get("INDEXER_CONNECTION_STRING")
@@ -37,11 +41,24 @@ def run_query():
     block_stats_per_day.to_csv(file_path, index=False)
 
 def process_data(): # This should send the file to S3 bucket, now just confirms the file is there
-    with open(file_path) as f:
-        csv_reader = csv.reader(f, delimiter=",")
-        for row in csv_reader:
-            print(row)
-            return
+    try:
+        s3_client = session.client("s3",
+            region_name="eu-west-1",
+            aws_access_key_id=ACCESS_ID,
+            aws_secret_access_key=ACCESS_KEY
+        )
+        s3_client.upload_file(
+            file_path,
+            "test-bucket-henri-1",
+            "simple_blocks.csv",
+        )
+
+    except Exception as e:
+        print("Exception when connecting to S3: ", e)
+        exit(1)
+
+def clean_up():
+    os.remove(file_path)
 
 with DAG(
     "simple_blocks_stats",
@@ -64,4 +81,9 @@ with DAG(
         python_callable=process_data
     )
 
-    t1 >> t2
+    t3 = PythonOperator(
+        task_id="clean_up",
+        python_callable=clean_up
+    )
+
+    t1 >> t2 >> t3
