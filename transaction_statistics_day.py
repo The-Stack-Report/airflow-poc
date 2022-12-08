@@ -18,9 +18,10 @@ ACCESS_KEY = Variable.get("AWS_ACCESS_KEY")
 dbConnection = None
 cache_path = "/opt/airflow/dags/cache" # so we can see it in our dags folder, should be something else in the real world
 
-def run_query():
+def run_query(**kwargs):
     try:
-        dbConnection = get_connection()
+        dbConnection = kwargs['connection']
+        print("run query: ", dbConnection)
         query = ops_for_date_query(datetime.datetime(2022, 10, 15, 0, 0))
         print("run query: ", query)
         ops_df = pd.read_sql(query, dbConnection)
@@ -202,7 +203,9 @@ def transaction_statistics_day(parent_dag_name, child_dag_name, args):
     run_initial_query = PythonOperator(
         task_id="run_query",
         python_callable=run_query,
-        dag=dag
+        dag=dag,
+        op_kwargs=args
+        
     )
     process = PythonOperator(
         task_id="process_data",

@@ -4,6 +4,8 @@ from airflow.operators.dummy_operator import DummyOperator
 from airflow.operators.subdag_operator import SubDagOperator
 from airflow.utils.dates import days_ago
 
+from lib.db import get_connection, ops_for_date_query
+
 import datetime
 
 from transaction_statistics_day import transaction_statistics_day
@@ -26,11 +28,17 @@ with DAG(
     catchup=False,
     tags=["STATISTICS"],
 ) as dag:
+    connection = get_connection()
+    print("created connection")
     for i in range(3):
+        args = {
+            "days_ago": days_ago(10-i),
+            "connection": connection
+        }
         task_id = f"day_operation_{i}"
         day_statistics = SubDagOperator(
             task_id=task_id,
-            subdag=transaction_statistics_day(DAG_ID, task_id, {"days_ago": days_ago(10-i)}),
+            subdag=transaction_statistics_day(DAG_ID, task_id, args),
             dag=dag
         )
 
