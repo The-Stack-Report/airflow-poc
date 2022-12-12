@@ -6,6 +6,7 @@ from airflow.operators.python import PythonOperator
 from airflow.utils.dates import days_ago
 
 from lib.db import ConnectionContainer, ops_for_date_query
+from lib.cache import Cache
 
 import datetime
 
@@ -14,12 +15,19 @@ from transaction_statistics_day import transaction_statistics_day
 DAG_ID="transaction_statistics"
 
 from airflow.utils.dates import days_ago
+import pandas as pd
 
 
 connection = ConnectionContainer()
 
-def prepare():
-    print("PREPARE!")
+def prepare(**kwargs):
+    cache = Cache("prepare")
+    accounts_query = """
+SELECT Accounts."Id", Accounts."Address" FROM public."Accounts" as Accounts
+ORDER BY "Id" ASC"""
+
+    accounts_df = pd.read_sql(accounts_query, kwargs["connection"].get_connection())
+    cache.store_global_df("accounts", accounts_df)
 
 with DAG(
     dag_id=DAG_ID,
@@ -40,7 +48,10 @@ with DAG(
         PythonOperator(
             task_id="prepare_task",
             dag=dag,
-            python_callable=prepare
+            python_callable=prepare,
+            op_kwargs={
+                "connection": connection
+            }
         )
     ]
 

@@ -36,12 +36,7 @@ def run_query(**kwargs):
         kwargs["cache"].store_df("day_ops", ops_df)
         del ops_df
         
-        accounts_query = """
-SELECT Accounts."Id", Accounts."Address" FROM public."Accounts" as Accounts
-ORDER BY "Id" ASC"""
-
-        accounts_df = pd.read_sql(accounts_query, dbConnection)
-        kwargs["cache"].store_df("accounts", accounts_df)
+        
     except Exception as e:
         print("exception when running the query", e)
 
@@ -50,7 +45,7 @@ def enrich_data(**kwargs):
     cache = kwargs["cache"]
 
     ops_for_day_df = cache.read_df("day_ops")
-    accounts_df = cache.read_df("accounts")
+    accounts_df = cache.read_global_df("accounts")
 
     ids_for_day = pd.unique(ops_for_day_df[["TargetId", "SenderId", "InitiatorId"]].values.ravel("K"))
     accounts_for_day_df = accounts_df[accounts_df["Id"].isin(ids_for_day)]

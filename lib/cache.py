@@ -25,7 +25,7 @@ class Cache():
         path = f"/opt/airflow/dags/cache/global_{key}.csv"
         df.to_csv(path, index=True)
 
-    def get_global_df(self, key):
+    def read_global_df(self, key):
         path = f"/opt/airflow/dags/cache/global_{key}.csv"
         df = pd.read_csv(path)
         return df
