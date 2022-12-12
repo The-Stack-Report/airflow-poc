@@ -7,8 +7,8 @@ class Cache():
         self.paths_to_destroy = []
 
     def __del__(self):
-
-
+        for path in self.paths_to_destroy:
+            os.remove(path)
 
     def store_df(self, key, df, persist=False):
         path = f"/opt/airflow/dags/cache/{self.dag_id}_{key}.csv"
@@ -17,8 +17,15 @@ class Cache():
         if persist is False:
             self.paths_to_destroy.append(path)
 
-
     def read_df(self, key):
         df = pd.read_csv(f"/opt/airflow/dags/cache/{self.dag_id}_{key}.csv")
         return df
 
+    def store_global_df(self, key, df):
+        path = f"/opt/airflow/dags/cache/global_{key}.csv"
+        df.to_csv(path, index=True)
+
+    def get_global_df(self, key):
+        path = f"/opt/airflow/dags/cache/global_{key}.csv"
+        df = pd.read_csv(path)
+        return df
