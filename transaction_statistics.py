@@ -2,6 +2,7 @@ from airflow.models import DAG
 
 from airflow.operators.dummy_operator import DummyOperator
 from airflow.operators.subdag_operator import SubDagOperator
+from airflow.operators.python import PythonOperator
 from airflow.utils.dates import days_ago
 
 from lib.db import ConnectionContainer, ops_for_date_query
@@ -17,6 +18,9 @@ from airflow.utils.dates import days_ago
 
 connection = ConnectionContainer()
 
+def prepare():
+    print("PREPARE!")
+
 with DAG(
     dag_id=DAG_ID,
     default_args={
@@ -31,7 +35,16 @@ with DAG(
     tags=["STATISTICS"],
 ) as dag:
     print("created connection")
-    for i in range(1):
+
+    tasks = [
+        PythonOperator(
+            task_id="prepare_task",
+            dag=dag,
+            python_callable=prepare
+        )
+    ]
+
+    for i in range(3):
         task_id = f"day_operation_{i}"
         args = {
             "days_ago": days_ago(10-i),
@@ -43,4 +56,7 @@ with DAG(
             dag=dag
         )
 
-    day_statistics
+        tasks[-1].set_downstream(day_statistics)
+        day_statistics.set_upstream(tasks[-1])
+
+        tasks.append(day_statistics)
