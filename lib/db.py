@@ -4,10 +4,22 @@ from sqlalchemy import create_engine
 import sqlalchemy
 import datetime
 
-def get_connection():
-    try:
-        engine_params = Variable.get("INDEXER_CONNECTION_STRING")
-        alchemyEngine = create_engine(
+class ConnectionContainer():
+    def __init__(self):
+        self.connection = None
+
+    def get_connection(self):
+        print("getConnection!")
+        if self.connection is None:
+            print("create connection")
+            self.connect()
+        
+        return self.connection
+    
+    def connect(self):
+        try:
+            engine_params = Variable.get("INDEXER_CONNECTION_STRING")
+            alchemyEngine = create_engine(
             engine_params, 
             pool_recycle=3600,
             pool_pre_ping=True,
@@ -17,11 +29,14 @@ def get_connection():
                 "keepalives_interval": 10,
                 "keepalives_count": 5,
             })
-        dbConnection = alchemyEngine.connect().execution_options(stream_results=True)
-        print("dbConnection acquired")
-        return dbConnection
-    except Exception as e:
-        print("Exception when connecting to db: ", e)
+            dbConnection = alchemyEngine.connect().execution_options(stream_results=True)
+            print("dbConnection acquired")
+
+            self.connection = dbConnection
+        except Exception as e:
+            print("Exception when connecting to db: ", e)
+            raise Exception("Couldn't connect to db")
+
 
 def ops_for_date_query(dt):
     next_dt = dt + datetime.timedelta(days=1)
