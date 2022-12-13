@@ -6,7 +6,7 @@ from airflow.operators.python import PythonOperator
 from airflow.utils.dates import days_ago
 
 from lib.db import ConnectionContainer, ops_for_date_query
-from lib.cache import Cache
+from lib.cache import Cache, collect_results
 
 import datetime
 
@@ -19,6 +19,15 @@ import pandas as pd
 
 
 connection = ConnectionContainer()
+
+def process_results():
+    print("process results")
+    frames = collect_results()
+    print(frames)
+    df = pd.concat(frames)
+    print(df)
+    df.to_csv("/opt/airflow/dags/cache/final_result.csv", index=True)
+    print("wrote file so it should be there now...")
 
 def prepare(**kwargs):
     cache = Cache("prepare")
@@ -37,13 +46,10 @@ with DAG(
         'retry_delay': datetime.timedelta(minutes=5)
     },
     description="Full history of statistics in Tezos chain",
-    schedule=datetime.timedelta(days=1),
     start_date=datetime.datetime(2022, 10, 24),
     catchup=False,
     tags=["STATISTICS"],
 ) as dag:
-    print("created connection")
-
     tasks = [
         PythonOperator(
             task_id="prepare_task",
@@ -55,7 +61,7 @@ with DAG(
         )
     ]
 
-    for i in range(3):
+    for i in range(2):
         task_id = f"day_operation_{i}"
         args = {
             "days_ago": days_ago(10-i),
@@ -71,3 +77,12 @@ with DAG(
         day_statistics.set_upstream(tasks[-1])
 
         tasks.append(day_statistics)
+
+    process_results_task = PythonOperator(
+        task_id="process_results",
+        dag=dag,
+        python_callable=process_results,
+    )
+
+    tasks[-1].set_downstream(collect_results)
+    collect_results.set_upstream(tasks[-1])

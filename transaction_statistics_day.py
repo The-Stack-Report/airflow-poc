@@ -169,6 +169,8 @@ def analyze_data(**kwargs):
         "baker_fee_xtz_median": df["BakerFee"].median() / 1_000_000,
         "baker_fee_xtz_mean": df["BakerFee"].mean() / 1_000_000,
     }
+
+    cache.store_global_df("results", pd.DataFrame(stats, index=[0]), is_result=True)
     print(stats)
 
 
