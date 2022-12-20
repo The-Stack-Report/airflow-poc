@@ -4,7 +4,7 @@ from airflow.models import Variable
 from airflow import DAG
 
 from lib.db import ops_for_date_query
-from lib.cache import Cache
+from lib.cache import get_df, store_df
 
 import pandas as pd
 import boto3
@@ -17,7 +17,6 @@ session = boto3.session.Session()
 ACCESS_ID = Variable.get("AWS_ACCESS_ID")
 ACCESS_KEY = Variable.get("AWS_ACCESS_KEY")
 dbConnection = None
-cache_path = "/opt/airflow/dags/cache" # so we can see it in our dags folder, should be something else in the real world
 
 def run_query(**kwargs):
     try:
@@ -33,19 +32,16 @@ def run_query(**kwargs):
         ops_df = pd.read_sql(query, dbConnection)
         print(ops_df)
 
-        kwargs["cache"].store_df("day_ops", ops_df)
+        store_df(ops_df, "day_ops", kwargs)
         del ops_df
-        
         
     except Exception as e:
         print("exception when running the query", e)
 
 
 def enrich_data(**kwargs):
-    cache = kwargs["cache"]
-
-    ops_for_day_df = cache.read_df("day_ops")
-    accounts_df = cache.read_global_df("accounts")
+    ops_for_day_df = get_df("day_ops", kwargs)
+    accounts_df = get_df("accounts", kwargs, True)
 
     ids_for_day = pd.unique(ops_for_day_df[["TargetId", "SenderId", "InitiatorId"]].values.ravel("K"))
     accounts_for_day_df = accounts_df[accounts_df["Id"].isin(ids_for_day)]
@@ -62,7 +58,7 @@ def enrich_data(**kwargs):
     }, inplace=True)
 
     ops_for_day_df.sort_values(by="Id", ascending=True, inplace=True)
-    cache.store_df("enriched", ops_for_day_df)
+    store_df(ops_for_day_df, "enriched", kwargs)
 
 def check(df):
     # Validating that each op group has only 1 wallet which is sending transactions in each transaction group.
@@ -90,8 +86,7 @@ def check(df):
 
 
 def analyze_data(**kwargs):
-    cache = kwargs["cache"]
-    df = cache.read_df("enriched")
+    df = get_df("enriched", kwargs)
     if check(df) is False:
         raise ValueError("Data frame did not pass checks")
 
@@ -170,7 +165,7 @@ def analyze_data(**kwargs):
         "baker_fee_xtz_mean": df["BakerFee"].mean() / 1_000_000,
     }
 
-    cache.store_global_df("results", pd.DataFrame(stats, index=[0]), is_result=True)
+    store_df(pd.DataFrame(stats, index=[0]), "results", kwargs)
     print(stats)
 
 
@@ -191,12 +186,7 @@ def process_data(**kwargs): # This should send the file to S3 bucket, now just c
         print("Exception when connecting to S3: ", e)
         exit(1)
 
-def clean_up():
-    os.remove(file_path)
-
 def transaction_statistics_day(parent_dag_name, child_dag_name, args):
-    args["cache"] = Cache(child_dag_name)
-
     dag = DAG(default_args={'depends_on_past': False,
             'retries': 3,
             'retry_delay': datetime.timedelta(minutes=5),

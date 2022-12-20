@@ -2,41 +2,35 @@ import pandas as pd
 import os
 import glob
 
-class Cache():
-    def __init__(self, dag_id) -> None:
-        self.dag_id = dag_id
-        self.paths_to_destroy = []
+base_path = "/opt/airflow/dags/cache"
 
-    def __del__(self):
-        for path in self.paths_to_destroy:
-            os.remove(path)
+def store_df(df, key, kwargs, is_global=False): # is_global means that the value is shared by different subdags
+    run_id, dag_id = extract_ids(kwargs)
 
-    def store_df(self, key, df, persist=False):
-        path = f"/opt/airflow/dags/cache/{self.dag_id}_{key}.csv"
-        df.to_csv(path, index=True)
+    path = f"{base_path}/{run_id}"
+    if os.path.isdir(path) is False:
+        os.mkdir(path)
 
-        if persist is False:
-            self.paths_to_destroy.append(path)
+    if is_global:
+        file_name = f"{key}.csv"
+    else:
+        file_name = f"{dag_id}_{key}.csv"
+    
+    df.to_csv(f"{path}/{file_name}", index=True)
+    
 
-    def read_df(self, key):
-        df = pd.read_csv(f"/opt/airflow/dags/cache/{self.dag_id}_{key}.csv")
-        return df
+def get_df(key, kwargs, is_global=False):
+    run_id, dag_id = extract_ids(kwargs)
 
-    def store_global_df(self, key, df, is_result=False):
-        if is_result:
-            path = f"/opt/airflow/dags/cache/result_{self.dag_id}_{key}.csv"
-        else:
-            path = f"/opt/airflow/dags/cache/global_{key}.csv"
-        df.to_csv(path, index=True)
+    path = f"{base_path}/{run_id}"
 
-    def read_global_df(self, key):
-        path = f"/opt/airflow/dags/cache/global_{key}.csv"
-        df = pd.read_csv(path)
-        return df
+    if is_global:
+        return pd.read_csv(f"{path}/{key}.csv")
+    
+    return pd.read_csv(f"{path}/{dag_id}_{key}.csv")
 
-
-def collect_results():
-    file_names = glob.glob("/opt/airflow/dags/cache/result_*.csv")
+def collect_results(run_id):
+    file_names = glob.glob(f"{base_path}/{run_id}/*results.csv")
     print("file names: ", file_names)
     frames = []
 
@@ -45,3 +39,6 @@ def collect_results():
         frames.append(df)
 
     return frames
+
+def extract_ids(kwargs):
+    return kwargs["dag_run"].run_id, kwargs['dag'].dag_id

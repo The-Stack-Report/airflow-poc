@@ -6,7 +6,7 @@ from airflow.operators.python import PythonOperator
 from airflow.utils.dates import days_ago
 
 from lib.db import ConnectionContainer, ops_for_date_query
-from lib.cache import Cache, collect_results
+from lib.cache import store_df, collect_results
 
 import datetime
 
@@ -15,28 +15,31 @@ from transaction_statistics_day import transaction_statistics_day
 DAG_ID="transaction_statistics"
 
 from airflow.utils.dates import days_ago
+
 import pandas as pd
+import time
 
 
 connection = ConnectionContainer()
 
-def process_results():
-    print("process results")
-    frames = collect_results()
-    print(frames)
-    df = pd.concat(frames)
-    print(df)
-    df.to_csv("/opt/airflow/dags/cache/final_result.csv", index=True)
-    print("wrote file so it should be there now...")
-
 def prepare(**kwargs):
-    cache = Cache("prepare")
     accounts_query = """
 SELECT Accounts."Id", Accounts."Address" FROM public."Accounts" as Accounts
 ORDER BY "Id" ASC"""
 
     accounts_df = pd.read_sql(accounts_query, kwargs["connection"].get_connection())
-    cache.store_global_df("accounts", accounts_df)
+    store_df(accounts_df, "accounts", kwargs, True)
+
+
+def process_results(**kwargs):
+    run_id = kwargs["dag_run"].run_id
+    print("process results")
+    frames = collect_results(run_id)
+    print(frames)
+    df = pd.concat(frames)
+    print(df)
+    df.to_csv(f"/opt/airflow/dags/cache/final_result_{run_id}.csv", index=True)
+
 
 with DAG(
     dag_id=DAG_ID,
@@ -50,23 +53,24 @@ with DAG(
     catchup=False,
     tags=["STATISTICS"],
 ) as dag:
+    args = {
+            "connection": connection,
+            "timestamp": int(time.time()),
+            "dag_id": DAG_ID
+        }
+
     tasks = [
         PythonOperator(
             task_id="prepare_task",
             dag=dag,
             python_callable=prepare,
-            op_kwargs={
-                "connection": connection
-            }
+            op_kwargs=args
         )
     ]
 
     for i in range(2):
         task_id = f"day_operation_{i}"
-        args = {
-            "days_ago": days_ago(10-i),
-            "connection": connection
-        }
+        args["days_ago"]: days_ago(10-i)
         day_statistics = SubDagOperator(
             task_id=task_id,
             subdag=transaction_statistics_day(DAG_ID, task_id, args),
@@ -82,7 +86,8 @@ with DAG(
         task_id="process_results",
         dag=dag,
         python_callable=process_results,
+        op_kwargs=args
     )
 
-    tasks[-1].set_downstream(collect_results)
-    collect_results.set_upstream(tasks[-1])
+    tasks[-1].set_downstream(process_results_task)
+    process_results_task.set_upstream(tasks[-1])
