@@ -5,17 +5,14 @@ from airflow import DAG
 
 from lib.db import ops_for_date_query
 from lib.cache import get_df, store_df
+from lib.s3 import upload_to_bucket
 
 import pandas as pd
-import boto3
-import os
 
 from airflow.operators.python import PythonOperator
 
-session = boto3.session.Session()
 
-ACCESS_ID = Variable.get("AWS_ACCESS_ID")
-ACCESS_KEY = Variable.get("AWS_ACCESS_KEY")
+
 dbConnection = None
 
 def run_query(**kwargs):
@@ -164,27 +161,13 @@ def analyze_data(**kwargs):
         "baker_fee_xtz_median": df["BakerFee"].median() / 1_000_000,
         "baker_fee_xtz_mean": df["BakerFee"].mean() / 1_000_000,
     }
-
-    store_df(pd.DataFrame(stats, index=[0]), "results", kwargs)
-    print(stats)
-
-
-def process_data(**kwargs): # This should send the file to S3 bucket, now just confirms the file is there
-    try:
-        s3_client = session.client("s3",
-            region_name="eu-west-1",
-            aws_access_key_id=ACCESS_ID,
-            aws_secret_access_key=ACCESS_KEY
+    result_df = pd.DataFrame(stats, index=[0])
+    store_df(result_df, "results", kwargs)
+    upload_to_bucket(
+        "the-stack-report-prototyping", 
+        f"{kwargs['dag'].dag_id}_result",
+        result_df
         )
-        s3_client.upload_file(
-            file_path,
-            "test-bucket-henri-1",
-            "simple_blocks.csv",
-        )
-
-    except Exception as e:
-        print("Exception when connecting to S3: ", e)
-        exit(1)
 
 def transaction_statistics_day(parent_dag_name, child_dag_name, args):
     dag = DAG(default_args={'depends_on_past': False,
