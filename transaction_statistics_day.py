@@ -16,6 +16,8 @@ from airflow.operators.python import PythonOperator
 dbConnection = None
 
 def run_query(**kwargs):
+    query_date = kwargs["days_ago"]
+
     try:
         if "connection" not in kwargs:
             raise Exception("No connection in arguments")
@@ -24,7 +26,7 @@ def run_query(**kwargs):
         dbConnection = conCon.get_connection()
         print("run query: ", dbConnection)
 
-        query = ops_for_date_query(datetime.datetime(2022, 10, 15, 0, 0))
+        query = ops_for_date_query(query_date)
         print("run query: ", query)
         ops_df = pd.read_sql(query, dbConnection)
         print(ops_df)
@@ -165,11 +167,12 @@ def analyze_data(**kwargs):
     store_df(result_df, "results", kwargs)
     upload_to_bucket(
         "the-stack-report-prototyping", 
-        f"{kwargs['dag'].dag_id}_result",
+        f"{kwargs['days_ago'].strftime('%m-%d-%Y')}_result",
         result_df
         )
 
 def transaction_statistics_day(parent_dag_name, child_dag_name, args):
+    print("creating transactions statistics dag", parent_dag_name, child_dag_name, args)
     dag = DAG(default_args={'depends_on_past': False,
             'retries': 3,
             'retry_delay': datetime.timedelta(minutes=5),

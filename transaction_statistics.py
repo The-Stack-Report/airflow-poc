@@ -69,8 +69,9 @@ with DAG(
     ]
 
     for i in range(2):
-        task_id = f"day_operation_{i}"
-        args["days_ago"]: days_ago(10-i)
+        args["days_ago"] = days_ago(10-i)
+        datestring = args["days_ago"].strftime('%m-%d-%Y')
+        task_id = f"day_operation_{datestring}"
         day_statistics = SubDagOperator(
             task_id=task_id,
             subdag=transaction_statistics_day(DAG_ID, task_id, args),
