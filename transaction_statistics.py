@@ -8,7 +8,11 @@ from airflow.utils.dates import days_ago
 from lib.db import ConnectionContainer, ops_for_date_query
 from lib.cache import store_df, collect_results
 
+from lib.s3 import get_missing_dates
+
 import datetime
+import random
+import string
 
 from transaction_statistics_day import transaction_statistics_day
 
@@ -22,22 +26,10 @@ import time
 
 connection = ConnectionContainer()
 
-def prepare(**kwargs):
-    accounts_query = """
-SELECT Accounts."Id", Accounts."Address" FROM public."Accounts" as Accounts
-ORDER BY "Id" ASC"""
-
-    accounts_df = pd.read_sql(accounts_query, kwargs["connection"].get_connection())
-    store_df(accounts_df, "accounts", kwargs, True)
-
-
 def process_results(**kwargs):
     run_id = kwargs["dag_run"].run_id
-    print("process results")
     frames = collect_results(run_id)
-    print(frames)
     df = pd.concat(frames)
-    print(df)
     df.to_csv(f"/opt/airflow/dags/cache/final_result_{run_id}.csv", index=True)
 
 
@@ -46,12 +38,13 @@ with DAG(
     default_args={
         'depends_on_past': False,
         'retries': 3,
-        'retry_delay': datetime.timedelta(minutes=5)
+        'retry_delay': datetime.timedelta(minutes=1)
     },
     description="Full history of statistics in Tezos chain",
-    start_date=datetime.datetime(2022, 10, 24),
+    start_date=datetime.datetime(2023, 2, 15),
     catchup=False,
     tags=["STATISTICS"],
+    is_paused_upon_creation=False
 ) as dag:
     args = {
             "connection": connection,
@@ -59,27 +52,23 @@ with DAG(
             "dag_id": DAG_ID
         }
 
-    tasks = [
-        PythonOperator(
-            task_id="prepare_task",
-            dag=dag,
-            python_callable=prepare,
-            op_kwargs=args
-        )
-    ]
 
-    for i in range(2):
-        args["days_ago"] = days_ago(10-i)
-        datestring = args["days_ago"].strftime('%m-%d-%Y')
+    tasks = []
+
+    dates = get_missing_dates("2022-12-1", "2023-02-24")
+
+    for date in dates:
+        args["date"] = date
+        datestring = date.strftime('%Y-%m-%d')
         task_id = f"day_operation_{datestring}"
         day_statistics = SubDagOperator(
             task_id=task_id,
             subdag=transaction_statistics_day(DAG_ID, task_id, args),
             dag=dag
         )
-
-        tasks[-1].set_downstream(day_statistics)
-        day_statistics.set_upstream(tasks[-1])
+        if len(tasks) > 0:
+            tasks[-1].set_downstream(day_statistics)
+            day_statistics.set_upstream(tasks[-1])
 
         tasks.append(day_statistics)
 

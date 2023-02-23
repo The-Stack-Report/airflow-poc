@@ -11,12 +11,19 @@ import pandas as pd
 
 from airflow.operators.python import PythonOperator
 
-
-
 dbConnection = None
 
+def prepare(**kwargs):
+    accounts_query = """
+SELECT Accounts."Id", Accounts."Address" FROM public."Accounts" as Accounts
+ORDER BY "Id" ASC"""
+
+    accounts_df = pd.read_sql(accounts_query, kwargs["connection"].get_connection())
+    store_df(accounts_df, "accounts", kwargs, True)
+
+
 def run_query(**kwargs):
-    query_date = kwargs["days_ago"]
+    query_date = kwargs["date"]
 
     try:
         if "connection" not in kwargs:
@@ -24,12 +31,12 @@ def run_query(**kwargs):
 
         conCon = kwargs["connection"]
         dbConnection = conCon.get_connection()
-        print("run query: ", dbConnection)
+        print("connection: ", dbConnection)
 
         query = ops_for_date_query(query_date)
         print("run query: ", query)
         ops_df = pd.read_sql(query, dbConnection)
-        print(ops_df)
+        print("result: ", ops_df)
 
         store_df(ops_df, "day_ops", kwargs)
         del ops_df
@@ -39,22 +46,37 @@ def run_query(**kwargs):
 
 
 def enrich_data(**kwargs):
+    print("enrich data")
     ops_for_day_df = get_df("day_ops", kwargs)
     accounts_df = get_df("accounts", kwargs, True)
 
     ids_for_day = pd.unique(ops_for_day_df[["TargetId", "SenderId", "InitiatorId"]].values.ravel("K"))
     accounts_for_day_df = accounts_df[accounts_df["Id"].isin(ids_for_day)]
+    del accounts_df
+
+    del ids_for_day
+
     addresses_by_id_for_day = dict(zip(accounts_for_day_df["Id"], accounts_for_day_df["Address"]))
+
+    del accounts_for_day_df
     
     ops_for_day_df["target_address"] = ops_for_day_df["TargetId"] # Sender address
     ops_for_day_df["sender_address"] = ops_for_day_df["SenderId"] # Initiator address
     ops_for_day_df["initiator_address"] = ops_for_day_df["InitiatorId"] # Target address
 
     ops_for_day_df.replace({
-        "target_address": addresses_by_id_for_day,
-        "sender_address": addresses_by_id_for_day,
+        "target_address": addresses_by_id_for_day
+    }, inplace=True)
+
+    ops_for_day_df.replace({
+        "sender_address": addresses_by_id_for_day
+    }, inplace=True)
+
+    ops_for_day_df.replace({
         "initiator_address": addresses_by_id_for_day
     }, inplace=True)
+
+
 
     ops_for_day_df.sort_values(by="Id", ascending=True, inplace=True)
     store_df(ops_for_day_df, "enriched", kwargs)
@@ -78,7 +100,6 @@ def check(df):
         raise ValueError(f"Maximum nr of unique wallets sending operations per operation group expected to be 1, but is {max_wallets}")
 
     if max_wallets > 1:
-        print(df)
         print(f"Df contains transaction groups with more than 1 sender wallet. Max found is: {max_wallets}")
     print("All operation groups contain only between 1 and 5 unique wallet sender address")
     return True
@@ -167,7 +188,7 @@ def analyze_data(**kwargs):
     store_df(result_df, "results", kwargs)
     upload_to_bucket(
         "the-stack-report-prototyping", 
-        f"{kwargs['days_ago'].strftime('%m-%d-%Y')}_result",
+        f"{kwargs['days_ago'].strftime('%Y-%m-%d')}_result",
         result_df
         )
 
@@ -183,6 +204,13 @@ def transaction_statistics_day(parent_dag_name, child_dag_name, args):
         start_date=datetime.datetime(2022, 10, 24),
         catchup=False,
         tags=["STATISTICS"])
+    
+    get_accounts = PythonOperator(
+        task_id="accounts",
+        python_callable=prepare,
+        dag=dag,
+        op_kwargs=args
+    )
     
     run_initial_query = PythonOperator(
         task_id="run_query",
@@ -210,6 +238,6 @@ def transaction_statistics_day(parent_dag_name, child_dag_name, args):
     #     python_callable=clean_up
     # )
 
-    run_initial_query >> enrich >> process
+    get_accounts >> run_initial_query >> enrich >> process
     
     return dag
